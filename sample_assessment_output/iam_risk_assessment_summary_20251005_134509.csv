@@ -1,0 +1,4 @@
+Username,Account_ID,Account_Name,Key_ID,Risk_Score,Status,Top_Risk_Factors
+admin-user,444444444444,Management Account,AKIAEXAMPLE111111111,9,Active,"Active key used in last 90 days; Active key created 90+ days ago; Active key created 360+ days ago"
+prod-service,222222222222,Production Account,AKIAEXAMPLE222222222,7,Active,"Active key used in last 90 days; Active key created 90+ days ago; Active key created 360+ days ago"
+developer,111111111111,Development Environment,AKIAEXAMPLE333333333,5,Active,"Active key used in last 90 days; Active key created 90+ days ago; Active key has risky inline policies"

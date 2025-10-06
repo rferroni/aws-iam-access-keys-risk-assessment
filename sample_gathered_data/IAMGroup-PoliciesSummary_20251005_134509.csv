@@ -1,0 +1,6 @@
+AccountID,GroupName,GroupId,Arn,InlinePolicy,AWSManagedPolicy,CustomerManagedPolicy
+"ID,444444444444",AdminGroup,AGPAEXAMPLE1111111111,arn:aws:iam::444444444444:group/AdminGroup,,"['IAMFullAccess']",
+"ID,222222222222",ServiceGroup,AGPAEXAMPLE2222222222,arn:aws:iam::222222222222:group/ServiceGroup,,"['CloudWatchReadOnlyAccess']",
+"ID,111111111111",DeveloperGroup,AGPAEXAMPLE3333333333,arn:aws:iam::111111111111:group/DeveloperGroup,"['DevGroupPolicy']","['AmazonEC2ReadOnlyAccess']",
+"ID,333333333333",ReadOnlyGroup,AGPAEXAMPLE4444444444,arn:aws:iam::333333333333:group/ReadOnlyGroup,,"['ReadOnlyAccess']",
+"ID,555555555555",AuditGroup,AGPAEXAMPLE5555555555,arn:aws:iam::555555555555:group/AuditGroup,,"['SecurityAudit']",

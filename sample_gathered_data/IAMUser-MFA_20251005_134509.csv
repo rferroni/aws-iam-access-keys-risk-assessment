@@ -1,0 +1,6 @@
+AccountID,UserName,UserId,Arn,MFAserialNumber
+"ID,444444444444",admin-user,AIDAEXAMPLE1111111111,arn:aws:iam::444444444444:user/admin-user,arn:aws:iam::444444444444:mfa/admin-user
+"ID,222222222222",prod-service,AIDAEXAMPLE2222222222,arn:aws:iam::222222222222:user/prod-service,arn:aws:iam::222222222222:mfa/prod-service
+"ID,111111111111",developer,AIDAEXAMPLE3333333333,arn:aws:iam::111111111111:user/developer,false
+"ID,333333333333",readonly-service,AIDAEXAMPLE4444444444,arn:aws:iam::333333333333:user/readonly-service,arn:aws:iam::333333333333:mfa/readonly-service
+"ID,555555555555",legacy-user,AIDAEXAMPLE5555555555,arn:aws:iam::555555555555:user/legacy-user,arn:aws:iam::555555555555:mfa/legacy-user

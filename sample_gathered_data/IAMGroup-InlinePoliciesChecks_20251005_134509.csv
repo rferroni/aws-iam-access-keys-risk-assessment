@@ -1,0 +1,2 @@
+AccountID,GroupName,GroupId,Arn,PolicyName,DocumentPolicy
+"ID,111111111111",DeveloperGroup,AGPAEXAMPLE3333333333,arn:aws:iam::111111111111:group/DeveloperGroup,DevGroupPolicy,"{'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Action': ['s3:GetObject', 's3:PutObject'], 'Resource': 'arn:aws:s3:::dev-bucket/*'}]}"

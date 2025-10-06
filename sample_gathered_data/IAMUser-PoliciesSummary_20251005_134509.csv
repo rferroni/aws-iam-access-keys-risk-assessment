@@ -1,0 +1,6 @@
+AccountID,UserName,UserId,Arn,InlinePolicy,AWSManagedPolicy,CustomerManagedPolicy,Groups,PermissionsBoundary,TotalManagedPoliciesAttached
+"ID,444444444444",admin-user,AIDAEXAMPLE1111111111,arn:aws:iam::444444444444:user/admin-user,"['CustomAdminPolicy']","['AdministratorAccess']",,['AdminGroup'],,1
+"ID,222222222222",prod-service,AIDAEXAMPLE2222222222,arn:aws:iam::222222222222:user/prod-service,,"['AmazonS3FullAccess', 'AmazonEC2ReadOnlyAccess']",,['ServiceGroup'],,2
+"ID,111111111111",developer,AIDAEXAMPLE3333333333,arn:aws:iam::111111111111:user/developer,"['CustomDevelopmentPolicy']","['PowerUserAccess']",,['DeveloperGroup'],,1
+"ID,333333333333",readonly-service,AIDAEXAMPLE4444444444,arn:aws:iam::333333333333:user/readonly-service,,"['ReadOnlyAccess']",,['ReadOnlyGroup'],,1
+"ID,555555555555",legacy-user,AIDAEXAMPLE5555555555,arn:aws:iam::555555555555:user/legacy-user,,"['SecurityAudit']",,['AuditGroup'],,1

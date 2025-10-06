@@ -1,0 +1,3 @@
+AccountID,UserName,UserId,Arn,PolicyName,DocumentPolicy
+"ID,444444444444",admin-user,AIDAEXAMPLE1111111111,arn:aws:iam::444444444444:user/admin-user,CustomAdminPolicy,"{'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Action': '*', 'Resource': '*'}]}"
+"ID,111111111111",developer,AIDAEXAMPLE3333333333,arn:aws:iam::111111111111:user/developer,CustomDevelopmentPolicy,"{'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Action': ['s3:*', 'ec2:*'], 'Resource': '*'}]}"
