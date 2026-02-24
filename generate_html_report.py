@@ -38,7 +38,7 @@ def render_badge(val, true_is_good=False):
         return f'<span class="badge {cls}">{icon} No</span>'
     return f'<span class="badge badge-neutral">{val}</span>'
 
-def build_html(rows, generated_at):
+def build_html(rows, generated_at, account_id=""):
     total = len(rows)
     active = sum(1 for r in rows if r["Status"] == "Active")
     inactive = total - active
@@ -201,7 +201,7 @@ def build_html(rows, generated_at):
   <div class="icon">🔐</div>
   <div>
     <h1>AWS IAM Access Key Risk Assessment</h1>
-    <p>Account: 566801649110 &nbsp;·&nbsp; Generated: {generated_at}</p>
+    <p>Account: {account_id} &nbsp;·&nbsp; Generated: {generated_at}</p>
   </div>
 </header>
 
@@ -338,7 +338,8 @@ def main():
         rows = list(csv.DictReader(f))
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    html = build_html(rows, generated_at)
+    account_id = rows[0].get("Account_ID", "") if rows else ""
+    html = build_html(rows, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), account_id)
 
     with open(out_path, "w") as f:
         f.write(html)
