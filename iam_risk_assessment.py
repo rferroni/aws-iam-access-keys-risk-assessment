@@ -12,12 +12,15 @@ import csv
 import json
 import logging
 import re
+import sys
+import yaml
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 from dataclasses import dataclass, field
 from collections import defaultdict
 from botocore.exceptions import ClientError, NoCredentialsError
+from generate_html_report import build_html
 
 # Configure logging
 logging.basicConfig(
@@ -49,14 +52,55 @@ class AccessKeyInfo:
     inline_policies: List[str] = field(default_factory=list)
     group_policies: Dict[str, Dict] = field(default_factory=dict)
 
+def load_risk_config(config_path: str) -> dict:
+    """Load risk criteria from a YAML or JSON config file.
+
+    Returns dict with keys: admin_policies, iam_key_policies, risky_patterns.
+    Missing keys are omitted from the result (caller merges with defaults).
+    """
+    path = Path(config_path)
+    if not path.exists():
+        logger.error(f"Config file not found: {config_path}")
+        sys.exit(1)
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            if path.suffix in ('.yaml', '.yml'):
+                data = yaml.safe_load(f)
+            elif path.suffix == '.json':
+                data = json.load(f)
+            else:
+                logger.error(f"Unsupported config file format: {path.suffix}. Use .yaml, .yml, or .json")
+                sys.exit(1)
+    except (yaml.YAMLError, json.JSONDecodeError) as e:
+        logger.error(f"Error parsing config file {config_path}: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error reading config file {config_path}: {e}")
+        sys.exit(1)
+
+    if not isinstance(data, dict):
+        logger.error(f"Config file must contain a mapping, got {type(data).__name__}")
+        sys.exit(1)
+
+    result = {}
+    for key in ('admin_policies', 'iam_key_policies', 'risky_patterns'):
+        if key in data:
+            result[key] = data[key]
+    return result
+
+
 class IAMCompleteAssessment:
     """Complete IAM assessment tool - data gathering + risk analysis"""
     
-    def __init__(self, profile_name: Optional[str] = None, shared_timestamp: Optional[str] = None, report_only: bool = False, skip_file_writing: bool = False):
+    def __init__(self, profile_name: Optional[str] = None, shared_timestamp: Optional[str] = None, report_only: bool = False, skip_file_writing: bool = False, output_base_dir: Optional[str] = None, risk_config: Optional[dict] = None):
         self.timestamp = shared_timestamp or datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.output_dir = Path(f"gathered_data_{self.timestamp}")
+        
+        base = Path(output_base_dir) if output_base_dir else Path.cwd()
+        base.mkdir(parents=True, exist_ok=True)
+        self.output_dir = base / f"gathered_data_{self.timestamp}"
         self.output_dir.mkdir(exist_ok=True)
-        self.assessment_dir = Path(f"assessment_output_{self.timestamp}")
+        self.assessment_dir = base / f"assessment_output_{self.timestamp}"
         self.assessment_dir.mkdir(exist_ok=True)
         
         if not report_only:
@@ -94,6 +138,7 @@ class IAMCompleteAssessment:
         self.accounts: Dict[str, str] = {}
         self.is_management_account = False
         self.cloudtrail_events: List[Dict] = []
+        self._users_cache: Optional[List[Dict]] = None
         self.admin_policies = {
             'AdministratorAccess', 'PowerUserAccess', 'IAMFullAccess',
             'AWSCloudTrailFullAccess', 'AmazonEC2FullAccess'
@@ -101,6 +146,22 @@ class IAMCompleteAssessment:
         self.iam_key_policies = {
             'IAMFullAccess', 'IAMUserChangePassword', 'IAMReadOnlyAccess'
         }
+        self.risky_patterns = [
+            '*', 'admin', 'full', 'all', 'root', 'super',
+            'iam:', 'sts:', 'organizations:', 'account:',
+            'createaccesskey', 'deleteaccesskey', 'updateaccesskey',
+            'createrole', 'deleterole', 'attachrolepolicy',
+            'createuser', 'deleteuser', 'attachuserpolicy'
+        ]
+        
+        # Override from config
+        if risk_config:
+            if 'admin_policies' in risk_config:
+                self.admin_policies = set(risk_config['admin_policies'])
+            if 'iam_key_policies' in risk_config:
+                self.iam_key_policies = set(risk_config['iam_key_policies'])
+            if 'risky_patterns' in risk_config:
+                self.risky_patterns = risk_config['risky_patterns']
         
         # Store gathered data for analysis
         self.gathered_data = {}
@@ -171,6 +232,9 @@ class IAMCompleteAssessment:
 
     def gather_iam_users(self) -> List[Dict]:
         """Gather all IAM users"""
+        if self._users_cache is not None:
+            return self._users_cache
+        
         logger.info("Gathering IAM users...")
         
         users = []
@@ -180,7 +244,8 @@ class IAMCompleteAssessment:
             users.extend(page['Users'])
         
         logger.info(f"Found {len(users)} IAM users")
-        return users
+        self._users_cache = users
+        return self._users_cache
 
     def gather_access_keys(self) -> List[Dict]:
         """Gather IAM user access keys"""
@@ -580,14 +645,6 @@ class IAMCompleteAssessment:
 
     def has_risky_inline_policies(self, key_info: AccessKeyInfo) -> bool:
         """Check if inline policies contain risky permissions"""
-        risky_patterns = [
-            '*', 'admin', 'full', 'all', 'root', 'super',
-            'iam:', 'sts:', 'organizations:', 'account:',
-            'createaccesskey', 'deleteaccesskey', 'updateaccesskey',
-            'createrole', 'deleterole', 'attachrolepolicy',
-            'createuser', 'deleteuser', 'attachuserpolicy'
-        ]
-        
         user_inline_docs = {}
         for row in self.gathered_data['user_inline']:
             username = row.get('UserName', '')
@@ -597,7 +654,7 @@ class IAMCompleteAssessment:
         
         if key_info.username in user_inline_docs:
             policy_content = user_inline_docs[key_info.username].lower()
-            if any(pattern in policy_content for pattern in risky_patterns):
+            if any(pattern in policy_content for pattern in self.risky_patterns):
                 return True
         
         return False
@@ -977,8 +1034,8 @@ class IAMCompleteAssessment:
                     risk_score += 0.5
                     risk_factors.append("Active key has custom inline policies")
             
-            # CloudTrail activity check (only for keys used in last 90 days)
-            if key_info.status.upper() == 'ACTIVE':
+            # CloudTrail activity check (only for keys used in last 90 days, skip in report-only mode)
+            if key_info.status.upper() == 'ACTIVE' and self.session is not None:
                 last_used_date = self.parse_date(key_info.last_used)
                 if last_used_date and last_used_date >= ninety_days_ago:
                     logger.info(f"Checking CloudTrail activity for key {key_info.key_id}")
@@ -1079,101 +1136,88 @@ class IAMCompleteAssessment:
         logger.info(f"CSV reports generated: {detailed_csv}, {summary_csv}")
         return detailed_csv, summary_csv
 
-    def generate_report(self) -> str:
-        """Generate comprehensive risk assessment report"""
-        logger.info("Generating risk assessment report...")
-        
-        total_keys = len(self.access_keys)
-        active_keys = sum(1 for key in self.access_keys if key.status.upper() == 'ACTIVE')
-        inactive_keys = total_keys - active_keys
-        
+    def generate_json_report(self) -> Path:
+        """Generate JSON report file."""
         sorted_keys = sorted(self.access_keys, key=lambda x: x.risk_score, reverse=True)
-        high_risk_keys = [key for key in sorted_keys if key.risk_score >= 5]
-        
-        report = []
-        report.append("=" * 80)
-        report.append("IAM ACCESS KEY RISK ASSESSMENT REPORT")
-        report.append("=" * 80)
-        report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        report.append("")
-        
-        account_stats = defaultdict(int)
-        for key in self.access_keys:
-            account_stats[key.account_id] += 1
-        
-        # Normalize account IDs and merge duplicates
-        normalized_stats = defaultdict(int)
-        normalized_accounts = {}
-        
-        for account_id, account_name in self.accounts.items():
-            normalized_id = account_id.replace('ID,', '').replace('"', '')
-            normalized_accounts[normalized_id] = account_name
-            if normalized_id in account_stats:
-                normalized_stats[normalized_id] += account_stats[normalized_id]
-        
-        # Add any remaining stats that weren't in accounts dict
-        for account_id, count in account_stats.items():
-            normalized_id = account_id.replace('ID,', '').replace('"', '')
-            if normalized_id not in normalized_stats:
-                normalized_stats[normalized_id] = count
-                if normalized_id not in normalized_accounts:
-                    normalized_accounts[normalized_id] = 'Unknown'
-        
-        # Ensure all accounts show up even with 0 keys
-        for normalized_id in normalized_accounts.keys():
-            if normalized_id not in normalized_stats:
-                normalized_stats[normalized_id] = 0
-        
-        report.append("OVERALL STATISTICS")
-        report.append("-" * 40)
-        report.append(f"Total access keys found: {total_keys}")
-        report.append(f"Active keys: {active_keys}")
-        report.append(f"Inactive keys: {inactive_keys}")
-        report.append(f"High-risk keys (score ≥ 5): {len(high_risk_keys)}")
-        report.append("")
-        report.append("ACCESS KEYS BY ACCOUNT:")
-        for account_id, count in sorted(normalized_stats.items()):
-            account_name = normalized_accounts.get(account_id, 'Unknown')
-            report.append(f"  {account_id} ({account_name}): {count} keys")
-        report.append("")
-        
-        if high_risk_keys:
-            report.append("HIGH-RISK ACCESS KEYS (Score ≥ 5)")
-            report.append("-" * 40)
-            for key in high_risk_keys:
-                account_name = normalized_accounts.get(key.account_id, 'Unknown')
-                report.append(f"• {key.username} ({key.key_id}) - Account: {key.account_id} ({account_name}) - Risk Score: {key.risk_score}")
-            report.append("")
-        
-        report.append("DETAILED FINDINGS")
-        report.append("-" * 40)
-        
-        for i, key in enumerate(sorted_keys, 1):
-            account_name = normalized_accounts.get(key.account_id, 'Unknown')
-            report.append(f"{i}. User: {key.username}")
-            report.append(f"   Account: {key.account_id} ({account_name})")
-            report.append(f"   Key ID: {key.key_id}")
-            report.append(f"   Status: {key.status}")
-            report.append(f"   Created: {key.created or 'Unknown'}")
-            report.append(f"   Last Used: {key.last_used or 'Never'}")
-            report.append(f"   Risk Score: {key.risk_score}/10")
-            
-            if key.risk_factors:
-                report.append("   Risk Factors:")
-                for factor in key.risk_factors:
-                    report.append(f"     - {factor}")
-            
-            if key.managed_policies:
-                report.append(f"   Managed Policies: {', '.join(key.managed_policies)}")
-            
-            if key.inline_policies:
-                report.append(f"   Inline Policies: {', '.join(key.inline_policies)}")
-            
-            report.append(f"   Console Access: {'Yes' if key.has_console_access else 'No'}")
-            report.append(f"   MFA Enabled: {'Yes' if key.has_mfa else 'No'}")
-            report.append("")
-        
-        return "\n".join(report)
+        total_keys = len(self.access_keys)
+        active_keys = sum(1 for k in self.access_keys if k.status.upper() == 'ACTIVE')
+        high_risk = sum(1 for k in self.access_keys if k.risk_score >= 5)
+
+        account_ids = list(set(k.account_id for k in self.access_keys))
+
+        report = {
+            "metadata": {
+                "generated_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+                "account_ids": account_ids
+            },
+            "summary": {
+                "total_keys": total_keys,
+                "active_keys": active_keys,
+                "inactive_keys": total_keys - active_keys,
+                "high_risk_keys": high_risk
+            },
+            "access_keys": []
+        }
+
+        for key in sorted_keys:
+            account_name = self.accounts.get(key.account_id, 'Unknown')
+            report["access_keys"].append({
+                "username": key.username,
+                "account_id": key.account_id,
+                "account_name": account_name,
+                "key_id": key.key_id,
+                "status": key.status,
+                "created": key.created or "Unknown",
+                "last_used": key.last_used or "Never",
+                "risk_score": key.risk_score,
+                "risk_factors": key.risk_factors,
+                "managed_policies": key.managed_policies,
+                "inline_policies": key.inline_policies,
+                "group_managed_policies": getattr(key, 'group_managed_policies', []),
+                "group_inline_policies": getattr(key, 'group_inline_policies', []),
+                "console_access": key.has_console_access,
+                "mfa_enabled": key.has_mfa
+            })
+
+        json_file = self.assessment_dir / f"iam_risk_assessment_{self.timestamp}.json"
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"JSON report generated: {json_file}")
+        return json_file
+
+    def generate_html_report(self) -> Path:
+        """Generate HTML report using build_html."""
+        sorted_keys = sorted(self.access_keys, key=lambda x: x.risk_score, reverse=True)
+        rows = []
+        for key in sorted_keys:
+            account_name = self.accounts.get(key.account_id, 'Unknown')
+            rows.append({
+                "Username": key.username,
+                "Account_ID": key.account_id,
+                "Account_Name": account_name,
+                "Key_ID": key.key_id,
+                "Status": key.status,
+                "Created": key.created or "Unknown",
+                "Last_Used": key.last_used or "Never",
+                "Risk_Score": str(key.risk_score),
+                "Risk_Factors": "; ".join(key.risk_factors),
+                "Managed_Policies": "; ".join(key.managed_policies),
+                "Inline_Policies": "; ".join(key.inline_policies),
+                "Console_Access": "Yes" if key.has_console_access else "No",
+                "MFA_Enabled": "Yes" if key.has_mfa else "No"
+            })
+
+        account_id = rows[0]["Account_ID"] if rows else ""
+        generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        html_content = build_html(rows, generated_at, account_id)
+
+        html_file = self.assessment_dir / f"iam_risk_report_{self.timestamp}.html"
+        with open(html_file, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+
+        logger.info(f"HTML report generated: {html_file}")
+        return html_file
 
     def run_complete_assessment(self):
         """Run the complete assessment - gather data and analyze"""
@@ -1192,15 +1236,12 @@ class IAMCompleteAssessment:
             self.enrich_with_policies_from_data()
             self.calculate_risk_scores()
             
-            report = self.generate_report()
-            
-            # Save report to file
-            report_file = self.assessment_dir / f"iam_complete_assessment_report_{self.timestamp}.txt"
-            with open(report_file, 'w') as f:
-                f.write(report)
-            
             # Generate CSV reports
             detailed_csv, summary_csv = self.generate_csv_reports()
+            
+            # Generate JSON and HTML reports
+            json_file = self.generate_json_report()
+            html_file = self.generate_html_report()
             
             # Save CloudTrail events
             self.save_all_cloudtrail_events()
@@ -1209,12 +1250,11 @@ class IAMCompleteAssessment:
             logger.info("COMPLETE IAM ASSESSMENT FINISHED")
             logger.info(f"Gathered data directory: {self.output_dir.absolute()}")
             logger.info(f"Assessment output directory: {self.assessment_dir.absolute()}")
-            logger.info(f"Text report: {report_file}")
             logger.info(f"Detailed CSV: {detailed_csv}")
             logger.info(f"Summary CSV: {summary_csv}")
+            logger.info(f"JSON report: {json_file}")
+            logger.info(f"HTML report: {html_file}")
             logger.info("=" * 60)
-            
-            print(report)
             
         except Exception as e:
             logger.error(f"Error during complete assessment: {e}")
@@ -1232,10 +1272,101 @@ def main():
         help='AWS profile name(s) to use (optional). Can specify multiple profiles separated by commas',
         default=None
     )
+    parser.add_argument('--output-dir', help='Base path for output directories')
+    parser.add_argument('--config', help='Path to YAML/JSON risk criteria config file')
+    parser.add_argument('--report-only', action='store_true', help='Generate reports from existing data without AWS API calls')
+    parser.add_argument('--data-dir', help='Path to previously gathered data directory (required with --report-only)')
     
     args = parser.parse_args()
     
+    # Validate CLI arguments
+    if args.report_only and not args.data_dir:
+        logger.error("--data-dir is required when using --report-only")
+        sys.exit(1)
+    if args.data_dir and not Path(args.data_dir).exists():
+        logger.error(f"Data directory not found: {args.data_dir}")
+        sys.exit(1)
+    if args.data_dir:
+        csv_files = list(Path(args.data_dir).glob('*.csv'))
+        if not csv_files:
+            logger.error(f"No CSV files found in data directory: {args.data_dir}")
+            sys.exit(1)
+    if args.output_dir:
+        output_path = Path(args.output_dir)
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+            # Test writability
+            test_file = output_path / '.write_test'
+            test_file.touch()
+            test_file.unlink()
+        except (PermissionError, OSError) as e:
+            logger.error(f"Output directory is not writable: {args.output_dir} - {e}")
+            sys.exit(1)
+    
+    # Load risk config if provided
+    risk_config = None
+    if args.config:
+        risk_config = load_risk_config(args.config)
+    
     try:
+        # Report-only mode
+        if args.report_only:
+            assessment = IAMCompleteAssessment(
+                shared_timestamp=datetime.now().strftime('%Y%m%d_%H%M%S'),
+                report_only=True,
+                output_base_dir=args.output_dir,
+                risk_config=risk_config
+            )
+            assessment.output_dir = Path(args.data_dir)
+            
+            # Load gathered data from CSV files
+            data_dir = Path(args.data_dir)
+            assessment.gathered_data = {
+                'accounts': [], 'access_keys': [], 'console_login': [],
+                'mfa': [], 'user_policies': [], 'user_inline': [],
+                'group_policies': [], 'group_inline': []
+            }
+            
+            # Map CSV filename patterns to gathered_data keys
+            file_mappings = {
+                'AWS-Accounts': ('accounts', ['AccountID', 'AccountName']),
+                'IAMUser-AccessKey': ('access_keys', ['AccountID', 'UserName', 'UserId', 'Arn', 'KeyId', 'KeyStatus', 'LastTimeUsed', 'CreationTime']),
+                'IAMUser-ConsoleLogin': ('console_login', ['AccountID', 'UserName', 'UserId', 'Arn', 'LastPasswordUsed']),
+                'IAMUser-MFA': ('mfa', ['AccountID', 'UserName', 'UserId', 'Arn', 'MFAserialNumber']),
+                'IAMUser-PoliciesSummary': ('user_policies', ['AccountID', 'UserName', 'UserId', 'Arn', 'InlinePolicy', 'AWSManagedPolicy', 'CustomerManagedPolicy', 'Groups', 'PermissionsBoundary', 'TotalManagedPoliciesAttached']),
+                'IAMUser-InlinePoliciesChecks': ('user_inline', ['AccountID', 'UserName', 'UserId', 'Arn', 'PolicyName', 'DocumentPolicy']),
+                'IAMGroup-PoliciesSummary': ('group_policies', ['AccountID', 'GroupName', 'GroupId', 'Arn', 'InlinePolicy', 'AWSManagedPolicy', 'CustomerManagedPolicy']),
+                'IAMGroup-InlinePoliciesChecks': ('group_inline', ['AccountID', 'GroupName', 'GroupId', 'Arn', 'PolicyName', 'DocumentPolicy']),
+            }
+            
+            for csv_file in data_dir.glob('*.csv'):
+                for pattern, (data_key, _) in file_mappings.items():
+                    if pattern in csv_file.name:
+                        with open(csv_file, newline='', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            assessment.gathered_data[data_key].extend(list(reader))
+                        break
+            
+            # Run analysis and generate reports
+            assessment.load_accounts_from_data()
+            assessment.load_access_keys_from_data()
+            assessment.enrich_with_console_access_from_data()
+            assessment.enrich_with_mfa_status_from_data()
+            assessment.enrich_with_policies_from_data()
+            assessment.calculate_risk_scores()
+            
+            detailed_csv, summary_csv = assessment.generate_csv_reports()
+            json_file = assessment.generate_json_report()
+            html_file = assessment.generate_html_report()
+            
+            logger.info("Report-only assessment completed")
+            logger.info(f"Detailed CSV: {detailed_csv}")
+            logger.info(f"Summary CSV: {summary_csv}")
+            logger.info(f"JSON report: {json_file}")
+            logger.info(f"HTML report: {html_file}")
+            
+            return 0
+        
         if args.profile and ',' in args.profile:
             # Multiple profiles - use shared timestamp
             profiles = [p.strip() for p in args.profile.split(',') if p.strip()]
@@ -1262,7 +1393,7 @@ def main():
                 logger.info(f"{'='*60}")
                 
                 try:
-                    assessment = IAMCompleteAssessment(profile_name=profile, shared_timestamp=shared_timestamp, skip_file_writing=True)
+                    assessment = IAMCompleteAssessment(profile_name=profile, shared_timestamp=shared_timestamp, skip_file_writing=True, output_base_dir=args.output_dir, risk_config=risk_config)
                     assessment.gather_all_data()
                     assessment.load_accounts_from_data()
                     assessment.load_access_keys_from_data()
@@ -1293,7 +1424,7 @@ def main():
             logger.info(f"{'='*60}")
             
             # Create final assessment with consolidated data
-            final_assessment = IAMCompleteAssessment(shared_timestamp=shared_timestamp, report_only=True)
+            final_assessment = IAMCompleteAssessment(shared_timestamp=shared_timestamp, report_only=True, output_base_dir=args.output_dir, risk_config=risk_config)
             final_assessment.access_keys = all_access_keys
             final_assessment.accounts = all_accounts
             final_assessment.cloudtrail_events = all_cloudtrail_events
@@ -1310,23 +1441,19 @@ def main():
             final_assessment.write_consolidated_csv('IAMGroup-InlinePoliciesChecks.csv', all_gathered_data['group_inline'], ['AccountID', 'GroupName', 'GroupId', 'Arn', 'PolicyName', 'DocumentPolicy'])
             
             # Generate consolidated reports
-            report = final_assessment.generate_report()
-            report_file = final_assessment.assessment_dir / f"iam_complete_assessment_report_{shared_timestamp}.txt"
-            with open(report_file, 'w') as f:
-                f.write(report)
-            
             detailed_csv, summary_csv = final_assessment.generate_csv_reports()
+            json_file = final_assessment.generate_json_report()
+            html_file = final_assessment.generate_html_report()
             final_assessment.save_consolidated_cloudtrail_events()
             
             logger.info(f"Consolidated assessment completed")
-            logger.info(f"Text report: {report_file}")
             logger.info(f"Detailed CSV: {detailed_csv}")
             logger.info(f"Summary CSV: {summary_csv}")
-            
-            print(report)
+            logger.info(f"JSON report: {json_file}")
+            logger.info(f"HTML report: {html_file}")
         else:
             # Single profile or default credentials
-            assessment = IAMCompleteAssessment(profile_name=args.profile)
+            assessment = IAMCompleteAssessment(profile_name=args.profile, output_base_dir=args.output_dir, risk_config=risk_config)
             assessment.run_complete_assessment()
         
         return 0

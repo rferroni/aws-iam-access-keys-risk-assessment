@@ -30,7 +30,12 @@ The `.gitignore` file prevents real assessment data from being committed:
 These sample files demonstrate:
 1. The structure and format of gathered AWS data
 2. Risk assessment scoring and analysis
-3. Report generation capabilities
+3. Report generation capabilities (HTML, CSV, JSON)
 4. CloudTrail integration features
+
+You can regenerate sample reports from the sample data using:
+```bash
+python3 iam_risk_assessment.py --report-only --data-dir sample_gathered_data --output-dir sample_output
+```
 
 When you run the actual tool, it will create timestamped directories with real data that will be automatically ignored by git.

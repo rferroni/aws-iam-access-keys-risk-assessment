@@ -39,7 +39,7 @@ This isn't just another data collector—it's an **intelligent security analyst*
 - 🔍 Analyzes CloudTrail activity across **all AWS regions**
 - 🏢 Supports **multi-account assessments** with consolidated reporting
 - 📈 Uses **15+ security criteria** to calculate precise risk scores
-- 📄 Generates reports in multiple formats (TXT, CSV) for different audiences
+- 📄 Generates reports in multiple formats (HTML, CSV, JSON) for different audiences
 
 ## ✨ Features
 
@@ -68,7 +68,7 @@ This isn't just another data collector—it's an **intelligent security analyst*
 <td width="50%">
 
 ### 📊 Actionable Output
-- 📄 **Multiple Formats** - Human-readable TXT + structured CSV reports
+- 📄 **Multiple Formats** - Interactive HTML with charts, structured CSV, and JSON for automation
 - 🗂️ **Organized Storage** - Timestamped folders for data versioning
 - 🎨 **High-Risk Summary** - Focus on keys requiring immediate attention
 - 📈 **Trend Analysis** - Compare assessments over time
@@ -267,6 +267,15 @@ python3 iam_risk_assessment.py --profile my-aws-profile
 
 # 🏢 Multi-account assessment (comma-separated profiles)
 python3 iam_risk_assessment.py --profile prod,staging,dev
+
+# 📂 Custom output directory
+python3 iam_risk_assessment.py --profile my-profile --output-dir /path/to/reports
+
+# ⚙️ Custom risk criteria config
+python3 iam_risk_assessment.py --profile my-profile --config risk_config.yaml
+
+# 🔄 Regenerate reports from previously gathered data
+python3 iam_risk_assessment.py --report-only --data-dir gathered_data_20251010_143000
 ```
 
 ### 🔄 What Happens When You Run It?
@@ -285,7 +294,7 @@ graph LR
 2. **🔍 Deep Analysis** - Evaluates permissions, group memberships, inline policies
 3. **🕵️ CloudTrail Forensics** - Queries all regions for recent key activity
 4. **📈 Risk Scoring** - Applies 15+ criteria to calculate risk scores
-5. **📄 Report Generation** - Creates TXT and CSV reports in organized folders
+5. **📄 Report Generation** - Creates HTML, CSV, and JSON reports in organized folders
 
 ### 🏢 Multi-Account Assessment
 
@@ -298,6 +307,57 @@ When assessing multiple accounts simultaneously, you get:
 | 📊 **Centralized Reporting** | One comprehensive report covering all accounts |
 | ⚡ **Efficiency** | Leverage AWS SSO for seamless multi-account access |
 | 🎯 **Organization View** | Identify patterns and risks across account boundaries |
+
+### ⚙️ Custom Risk Criteria
+
+Customize the risk scoring criteria for your organization using a YAML or JSON config file:
+
+```yaml
+# risk_config.yaml
+admin_policies:
+  - AdministratorAccess
+  - PowerUserAccess
+  - MyOrgAdminPolicy
+
+iam_key_policies:
+  - IAMFullAccess
+  - MyOrgIAMPolicy
+
+risky_patterns:
+  - "*"
+  - "admin"
+  - "iam:"
+  - "my-org-sensitive-action"
+```
+
+```bash
+python3 iam_risk_assessment.py --profile my-profile --config risk_config.yaml
+```
+
+Any keys omitted from the config file will use the built-in defaults.
+
+### 🔄 Report-Only Mode
+
+Regenerate reports from previously gathered data without making any AWS API calls:
+
+```bash
+# Regenerate reports with new output formats
+python3 iam_risk_assessment.py --report-only --data-dir gathered_data_20251010_143000
+
+# Regenerate with custom config and output location
+python3 iam_risk_assessment.py --report-only --data-dir gathered_data_20251010_143000 \
+  --config risk_config.yaml --output-dir /path/to/reports
+```
+
+### 📋 CLI Reference
+
+| Flag | Description |
+|------|-------------|
+| `--profile` | AWS profile name(s), comma-separated for multi-account |
+| `--output-dir` | Base path for output directories (default: current directory) |
+| `--config` | Path to YAML/JSON risk criteria config file |
+| `--report-only` | Generate reports from existing data (requires `--data-dir`) |
+| `--data-dir` | Path to previously gathered data directory |
 
 ## 📁 Output Structure
 
@@ -317,7 +377,8 @@ The tool generates organized, timestamped directories for easy tracking and comp
 │   └── CloudTrail-Events_*.csv                # 🕵️ Usage forensics
 │
 ├── 📂 assessment_output_20251010_143000/      # 📊 Risk analysis reports
-│   ├── iam_complete_assessment_report_*.txt   # 📄 Human-readable
+│   ├── iam_risk_report_*.html                 # 🌐 Interactive HTML with charts
+│   ├── iam_risk_assessment_*.json             # 📋 Machine-readable JSON
 │   ├── iam_risk_assessment_detailed_*.csv     # 📈 Complete dataset
 │   └── iam_risk_assessment_summary_*.csv      # 🎯 High-risk keys only
 │
@@ -362,14 +423,19 @@ The tool generates organized, timestamped directories for easy tracking and comp
 </td>
 <td>
 
-1. **📄 Text Report** - Executive summary with:
-   - Overall statistics and high-risk summary
-   - Account-by-account breakdown
-   - Detailed findings for each key
+1. **🌐 HTML Report** - Interactive dashboard with:
+   - Chart.js visualizations (risk distribution, per-user scores, MFA status)
+   - Color-coded risk score table
+   - Overall statistics and summary cards
 
-2. **📈 Detailed CSV** - Complete data for analysis tools
+2. **📋 JSON Report** - Machine-readable output with:
+   - Metadata (timestamp, account IDs)
+   - Summary statistics
+   - Detailed access key assessments
 
-3. **🎯 Summary CSV** - High-risk keys only (score ≥ 5)
+3. **📈 Detailed CSV** - Complete data for analysis tools
+
+4. **🎯 Summary CSV** - High-risk keys only (score ≥ 5)
 
 </td>
 </tr>
@@ -394,136 +460,35 @@ The tool generates organized, timestamped directories for easy tracking and comp
 
 ### 📄 What's in the Reports?
 
-The comprehensive text report includes:
+The HTML report includes interactive Chart.js visualizations:
 
-- ✅ **Overall Statistics** - Total keys, active/inactive counts, high-risk summary
-- 🏢 **Account Breakdown** - Keys per account with proper account names
-- 🚨 **High-Risk Summary** - Keys requiring immediate attention (score ≥ 5)
-- 🔍 **Detailed Findings** - For each access key:
-  - 📊 Risk score and contributing factors
-  - 📅 Key metadata (status, creation, last used)
-  - 🔑 Attached policies (managed, customer, inline)
-  - 👥 Group memberships and inherited permissions
-  - 🖥️ Console access and MFA status
-  - 🕵️ CloudTrail activity (read vs write operations)
+- 📊 **Risk Distribution** - Donut chart showing critical/high/medium/low breakdown
+- 👤 **Per-User Risk Scores** - Horizontal bar chart of max risk score per user
+- 🔐 **MFA Status** - Donut chart of MFA-enabled vs disabled active keys
+- 📋 **Detailed Table** - All access keys sorted by risk score with:
+  - Risk score bar with severity label
+  - Key metadata (status, creation, last used)
+  - Attached policies (managed and inline)
+  - Console access and MFA badges
+  - Risk factors list
+
+The JSON report provides structured data for automation:
+
+```json
+{
+  "metadata": { "generated_at": "...", "account_ids": ["..."] },
+  "summary": { "total_keys": 5, "active_keys": 4, "inactive_keys": 1, "high_risk_keys": 3 },
+  "access_keys": [{ "username": "...", "risk_score": 9, "risk_factors": ["..."], ... }]
+}
+```
 
 ## 📸 Example Output
 
-Here's what a typical assessment report looks like:
+Here's what the HTML report dashboard looks like:
 
-<details>
-<summary><b>🔍 Click to view sample report output</b></summary>
+![Sample Report](sample_report_screenshot.png)
 
-```
-================================================================================
-IAM ACCESS KEY RISK ASSESSMENT REPORT
-================================================================================
-Generated: 2025-10-05 13:45:09
-
-OVERALL STATISTICS
-----------------------------------------
-Total access keys found: 5
-Active keys: 4
-Inactive keys: 1
-High-risk keys (score ≥ 5): 3
-
-ACCESS KEYS BY ACCOUNT:
-  111111111111 (Development Environment): 1 keys
-  222222222222 (Production Account): 2 keys
-  333333333333 (Staging Environment): 1 keys
-  444444444444 (Management Account): 1 keys
-  555555555555 (Security Account): 0 keys
-
-HIGH-RISK ACCESS KEYS (Score ≥ 5)
-----------------------------------------
-• admin-user (AKIAEXAMPLE111111111) - Account: 444444444444 (Management Account) - Risk Score: 9
-• prod-service (AKIAEXAMPLE222222222) - Account: 222222222222 (Production Account) - Risk Score: 7
-• developer (AKIAEXAMPLE333333333) - Account: 111111111111 (Development Environment) - Risk Score: 5
-
-DETAILED FINDINGS
-----------------------------------------
-1. User: admin-user
-   Account: 444444444444 (Management Account)
-   Key ID: AKIAEXAMPLE111111111
-   Status: Active
-   Created: 2023-06-15 10:30:00
-   Last Used: 2025-10-03 14:22:00
-   Risk Score: 9/10
-   Risk Factors:
-     - Active key used in last 90 days
-     - Active key created 90+ days ago
-     - Active key created 360+ days ago
-     - Active key has admin/power user privileges
-     - Active key with admin access used in last 90 days
-     - Active key has write operations in CloudTrail (last 90 days)
-     - Access key in management account
-     - Associated user has console access
-   Managed Policies: AdministratorAccess
-   Console Access: Yes
-   MFA Enabled: Yes
-
-2. User: prod-service
-   Account: 222222222222 (Production Account)
-   Key ID: AKIAEXAMPLE222222222
-   Status: Active
-   Created: 2024-01-20 09:15:00
-   Last Used: 2025-10-04 11:30:00
-   Risk Score: 7/10
-   Risk Factors:
-     - Active key used in last 90 days
-     - Active key created 90+ days ago
-     - Active key created 360+ days ago
-     - Active key has CloudTrail activity in last 90 days
-     - Access key in production account
-   Managed Policies: S3FullAccess, EC2ReadOnlyAccess
-   Console Access: No
-   MFA Enabled: Yes
-
-3. User: developer
-   Account: 111111111111 (Development Environment)
-   Key ID: AKIAEXAMPLE333333333
-   Status: Active
-   Created: 2024-08-10 16:45:00
-   Last Used: 2025-10-02 09:30:00
-   Risk Score: 5/10
-   Risk Factors:
-     - Active key used in last 90 days
-     - Active key created 90+ days ago
-     - Active key has risky inline policies
-     - Associated user has console access
-     - Associated user doesn't have MFA enabled
-   Inline Policies: CustomDevelopmentPolicy
-   Console Access: Yes
-   MFA Enabled: No
-
-4. User: readonly-service
-   Account: 333333333333 (Staging Environment)
-   Key ID: AKIAEXAMPLE444444444
-   Status: Active
-   Created: 2025-09-01 12:00:00
-   Last Used: 2025-10-01 08:15:00
-   Risk Score: 3/10
-   Risk Factors:
-     - Active key used in last 90 days
-     - Access key in staging account
-   Managed Policies: ReadOnlyAccess
-   Console Access: No
-   MFA Enabled: Yes
-
-5. User: legacy-user
-   Account: 555555555555 (Security Account)
-   Key ID: AKIAEXAMPLE555555555
-   Status: Inactive
-   Created: 2022-03-15 14:20:00
-   Last Used: 2023-12-10 11:45:00
-   Risk Score: 0/10
-   Risk Factors: None (inactive key)
-   Managed Policies: SecurityAuditAccess
-   Console Access: Yes
-   MFA Enabled: Yes
-```
-
-</details>
+Sample output files are available in the `sample_assessment_output/` directory, including HTML, CSV, and JSON reports generated from sanitized sample data.
 
 ---
 
@@ -533,6 +498,7 @@ DETAILED FINDINGS
 |-------------|---------|---------|
 | 🐍 **Python** | 3.6+ | Runtime environment |
 | 📦 **boto3** | Latest | AWS SDK for Python |
+| 📦 **pyyaml** | 6.0+ | YAML config file support |
 | ☁️ **AWS Credentials** | - | Account access with read-only IAM permissions |
 | 🔐 **IAM Permissions** | See above | Read access to IAM, CloudTrail, Organizations |
 

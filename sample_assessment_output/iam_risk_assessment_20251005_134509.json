@@ -1,0 +1,139 @@
+{
+  "metadata": {
+    "generated_at": "2026-04-19T23:07:01",
+    "account_ids": [
+      "222222222222",
+      "555555555555",
+      "111111111111",
+      "333333333333",
+      "444444444444"
+    ]
+  },
+  "summary": {
+    "total_keys": 5,
+    "active_keys": 4,
+    "inactive_keys": 1,
+    "high_risk_keys": 2
+  },
+  "access_keys": [
+    {
+      "username": "developer",
+      "account_id": "111111111111",
+      "account_name": "Unknown",
+      "key_id": "AKIAEXAMPLE333333333",
+      "status": "Active",
+      "created": "2024-08-10 16:45:00",
+      "last_used": "2025-10-02 09:30:00",
+      "risk_score": 6,
+      "risk_factors": [
+        "Active key created 90+ days ago",
+        "Active key created 360+ days ago",
+        "Active key has admin/power user privileges",
+        "Active key has risky inline policies",
+        "Associated user has console access",
+        "Associated user doesn't have MFA enabled"
+      ],
+      "managed_policies": [
+        "PowerUserAccess"
+      ],
+      "inline_policies": [
+        "CustomDevelopmentPolicy"
+      ],
+      "group_managed_policies": [],
+      "group_inline_policies": [],
+      "console_access": true,
+      "mfa_enabled": false
+    },
+    {
+      "username": "admin-user",
+      "account_id": "444444444444",
+      "account_name": "Unknown",
+      "key_id": "AKIAEXAMPLE111111111",
+      "status": "Active",
+      "created": "2023-06-15 10:30:00",
+      "last_used": "2025-10-03 14:22:00",
+      "risk_score": 5,
+      "risk_factors": [
+        "Active key created 90+ days ago",
+        "Active key created 360+ days ago",
+        "Active key has admin/power user privileges",
+        "Active key has risky inline policies",
+        "Associated user has console access"
+      ],
+      "managed_policies": [
+        "AdministratorAccess"
+      ],
+      "inline_policies": [
+        "CustomAdminPolicy"
+      ],
+      "group_managed_policies": [],
+      "group_inline_policies": [],
+      "console_access": true,
+      "mfa_enabled": true
+    },
+    {
+      "username": "prod-service",
+      "account_id": "222222222222",
+      "account_name": "Unknown",
+      "key_id": "AKIAEXAMPLE222222222",
+      "status": "Active",
+      "created": "2024-01-20 09:15:00",
+      "last_used": "2025-10-04 11:30:00",
+      "risk_score": 3,
+      "risk_factors": [
+        "Active key created 90+ days ago",
+        "Active key created 360+ days ago",
+        "Active key has admin/power user privileges"
+      ],
+      "managed_policies": [
+        "AmazonS3FullAccess",
+        "AmazonEC2ReadOnlyAccess"
+      ],
+      "inline_policies": [],
+      "group_managed_policies": [],
+      "group_inline_policies": [],
+      "console_access": false,
+      "mfa_enabled": true
+    },
+    {
+      "username": "readonly-service",
+      "account_id": "333333333333",
+      "account_name": "Unknown",
+      "key_id": "AKIAEXAMPLE444444444",
+      "status": "Active",
+      "created": "2025-09-01 12:00:00",
+      "last_used": "2025-10-01 08:15:00",
+      "risk_score": 1,
+      "risk_factors": [
+        "Active key created 90+ days ago"
+      ],
+      "managed_policies": [
+        "ReadOnlyAccess"
+      ],
+      "inline_policies": [],
+      "group_managed_policies": [],
+      "group_inline_policies": [],
+      "console_access": false,
+      "mfa_enabled": true
+    },
+    {
+      "username": "legacy-user",
+      "account_id": "555555555555",
+      "account_name": "Unknown",
+      "key_id": "AKIAEXAMPLE555555555",
+      "status": "Inactive",
+      "created": "2022-03-15 14:20:00",
+      "last_used": "2023-12-10 11:45:00",
+      "risk_score": 0,
+      "risk_factors": [],
+      "managed_policies": [
+        "SecurityAudit"
+      ],
+      "inline_policies": [],
+      "group_managed_policies": [],
+      "group_inline_policies": [],
+      "console_access": true,
+      "mfa_enabled": true
+    }
+  ]
+}

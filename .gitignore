@@ -9,6 +9,9 @@ assessment_output_*/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.hypothesis/
+test/
 
 # Virtual environment
 venv/
@@ -17,6 +20,7 @@ env/
 # IDE files
 .vscode/
 .idea/
+.kiro/
 
 # OS files
 .DS_Store
