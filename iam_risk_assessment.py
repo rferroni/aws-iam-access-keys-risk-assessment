@@ -858,6 +858,7 @@ class IAMCompleteAssessment:
         
         for row in self.gathered_data['accounts']:
             account_id = row.get('AccountID', '').strip()
+            account_id = account_id.replace('ID,', '').replace('"', '')
             account_name = row.get('AccountName', '').strip()
             if account_id and account_name:
                 self.accounts[account_id] = account_name

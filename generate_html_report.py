@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a rich HTML report from IAM risk assessment CSV output.
+Generate an interactive HTML report from IAM risk assessment data.
 Usage: python3 generate_html_report.py <detailed_csv> [output.html]
 """
 
@@ -11,312 +11,299 @@ from datetime import datetime
 from pathlib import Path
 
 
-def score_class(score):
-    s = int(score)
-    if s >= 8: return "critical"
-    if s >= 5: return "high"
-    if s >= 3: return "medium"
-    if s >= 1: return "low"
-    return "none"
-
-def score_label(score):
-    s = int(score)
-    if s >= 8: return "CRITICAL"
-    if s >= 5: return "HIGH"
-    if s >= 3: return "MEDIUM"
-    if s >= 1: return "LOW"
-    return "NONE"
-
-def render_badge(val, true_is_good=False):
-    if val in ("Yes", "True", "true", "yes"):
-        cls = "badge-good" if true_is_good else "badge-bad"
-        icon = "✓"
-        return f'<span class="badge {cls}">{icon} Yes</span>'
-    if val in ("No", "False", "false", "no"):
-        cls = "badge-bad" if true_is_good else "badge-good"
-        icon = "✗"
-        return f'<span class="badge {cls}">{icon} No</span>'
-    return f'<span class="badge badge-neutral">{val}</span>'
-
 def build_html(rows, generated_at, account_id=""):
+    """Build a self-contained interactive HTML report.
+
+    Args:
+        rows: list of dicts with keys Username, Account_ID, Account_Name,
+              Key_ID, Status, Created, Last_Used, Risk_Score, Risk_Factors,
+              Managed_Policies, Inline_Policies, Console_Access, MFA_Enabled.
+        generated_at: timestamp string for the report header.
+        account_id: primary account ID shown in the header.
+    """
     total = len(rows)
-    active = sum(1 for r in rows if r["Status"] == "Active")
+    active = sum(1 for r in rows if r.get("Status", "").upper() == "ACTIVE")
     inactive = total - active
-    critical = sum(1 for r in rows if int(r["Risk_Score"]) >= 8)
-    high     = sum(1 for r in rows if 5 <= int(r["Risk_Score"]) < 8)
-    medium   = sum(1 for r in rows if 3 <= int(r["Risk_Score"]) < 5)
-    low      = sum(1 for r in rows if 1 <= int(r["Risk_Score"]) < 3)
-    no_mfa   = sum(1 for r in rows if r["MFA_Enabled"] == "No" and r["Status"] == "Active")
-    has_mfa  = sum(1 for r in rows if r["MFA_Enabled"] == "Yes" and r["Status"] == "Active")
-    console  = sum(1 for r in rows if r["Console_Access"] == "Yes")
 
-    rows_sorted = sorted(rows, key=lambda r: int(r["Risk_Score"]), reverse=True)
+    # Compute risk distribution
+    critical = sum(1 for r in rows if int(r["Risk_Score"]) >= 7)
+    high = sum(1 for r in rows if 5 <= int(r["Risk_Score"]) < 7)
+    medium = sum(1 for r in rows if 3 <= int(r["Risk_Score"]) < 5)
+    low = sum(1 for r in rows if int(r["Risk_Score"]) < 3)
 
-    # Per-user chart data (highest score per user)
-    user_scores = {}
-    for r in rows_sorted:
-        u = r["Username"]
-        s = int(r["Risk_Score"])
-        if u not in user_scores or s > user_scores[u]:
-            user_scores[u] = s
-    user_labels = json.dumps(list(user_scores.keys()))
-    user_data   = json.dumps(list(user_scores.values()))
-    user_colors = json.dumps([
-        "#e53e3e" if s >= 8 else "#dd6b20" if s >= 5 else "#d69e2e" if s >= 3 else "#38a169"
-        for s in user_scores.values()
-    ])
+    # Unique accounts
+    accounts = {}
+    for r in rows:
+        aid = r.get("Account_ID", "")
+        aname = r.get("Account_Name", "")
+        if aid and aid not in accounts:
+            accounts[aid] = aname
 
-    def key_rows():
-        out = []
-        for r in rows_sorted:
-            sc = int(r["Risk_Score"])
-            cls = score_class(sc)
-            label = score_label(sc)
-            factors = "".join(
-                f'<li>{f.strip()}</li>'
-                for f in r["Risk_Factors"].split(";") if f.strip()
-            )
-            policies = " · ".join(p.strip() for p in r["Managed_Policies"].split(";") if p.strip())
-            inline = r.get("Inline_Policies", "").strip() or "—"
-            last_used = r["Last_Used"][:10] if r.get("Last_Used") else "—"
-            out.append(f"""
-            <tr class="row-{cls}">
-              <td><strong>{r['Username']}</strong></td>
-              <td class="mono">{r['Key_ID']}</td>
-              <td>{render_badge(r['Status'])}</td>
-              <td>{r['Created'][:10]}</td>
-              <td>{last_used}</td>
-              <td>
-                <div class="score-wrap">
-                  <span class="score-num score-{cls}">{sc}</span>
-                  <span class="score-bar-bg"><span class="score-bar score-bar-{cls}" style="width:{sc*10}%"></span></span>
-                  <span class="score-lbl score-{cls}">{label}</span>
-                </div>
-              </td>
-              <td>{render_badge(r['MFA_Enabled'], true_is_good=True)}</td>
-              <td>{render_badge(r['Console_Access'])}</td>
-              <td class="factors"><ul>{factors}</ul></td>
-              <td class="policies">{policies}<br><em class="inline-pol">{inline}</em></td>
-            </tr>""")
-        return "\n".join(out)
+    num_accounts = len(accounts) or 1
+
+    # Detect production/management accounts
+    prod_keywords = ("production", "prod", "management", "mgmt")
+    prod_accounts = set()
+    for aid, aname in accounts.items():
+        if any(kw in aname.lower() for kw in prod_keywords):
+            prod_accounts.add(aid)
+
+    critical_account_keys = sum(
+        1 for r in rows if r.get("Account_ID", "") in prod_accounts
+    )
+
+    # Build account options for filter dropdown
+    account_options = "".join(
+        f'<option value="{aid}">{aid} ({aname})</option>'
+        for aid, aname in sorted(accounts.items())
+    )
+
+    # Build unique score options
+    scores = sorted(set(int(r["Risk_Score"]) for r in rows))
+    score_options = "".join(
+        f'<option value="{s}">{s}</option>' for s in scores
+    )
+
+    # Build JSON data array for JS
+    js_data = []
+    for r in rows:
+        aid = r.get("Account_ID", "")
+        js_data.append({
+            "username": r.get("Username", ""),
+            "account_id": aid,
+            "account_name": r.get("Account_Name", ""),
+            "key_id": r.get("Key_ID", ""),
+            "status": r.get("Status", "").upper(),
+            "created": r.get("Created", ""),
+            "last_used": r.get("Last_Used", ""),
+            "risk_score": int(r["Risk_Score"]),
+            "risk_factors": r.get("Risk_Factors", ""),
+            "managed_policies": r.get("Managed_Policies", ""),
+            "inline_policies": r.get("Inline_Policies", ""),
+            "console_access": r.get("Console_Access", "No"),
+            "mfa_enabled": r.get("MFA_Enabled", "No"),
+            "is_production": aid in prod_accounts,
+        })
+
+    data_json = json.dumps(js_data, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AWS IAM Key Risk Assessment</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<title>IAM Access Key Risk Assessment</title>
 <style>
-  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background: #f0f2f5; color: #1a202c; min-height: 100vh; }}
-
-  /* ── Header ── */
-  header {{ background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
-            color: white; padding: 2rem 2.5rem; display: flex; align-items: center; gap: 1rem; }}
-  header .icon {{ font-size: 2.2rem; }}
-  header h1 {{ font-size: 1.5rem; font-weight: 700; }}
-  header p {{ opacity: 0.6; font-size: 0.82rem; margin-top: 0.25rem; }}
-
-  /* ── Summary cards ── */
-  .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-              gap: 1rem; padding: 1.5rem 2.5rem; }}
-  .card {{ background: white; border-radius: 12px; padding: 1.2rem 1.4rem;
-           box-shadow: 0 1px 4px rgba(0,0,0,0.07); border-top: 4px solid #e2e8f0;
-           transition: transform .15s; }}
-  .card:hover {{ transform: translateY(-2px); }}
-  .card.c-critical {{ border-color: #e53e3e; }}
-  .card.c-high     {{ border-color: #dd6b20; }}
-  .card.c-medium   {{ border-color: #d69e2e; }}
-  .card.c-blue     {{ border-color: #3182ce; }}
-  .card.c-green    {{ border-color: #38a169; }}
-  .card .num {{ font-size: 2.2rem; font-weight: 800; line-height: 1; }}
-  .card .lbl {{ font-size: 0.7rem; color: #718096; margin-top: 0.3rem;
-                text-transform: uppercase; letter-spacing: 0.06em; }}
-  .card.c-critical .num {{ color: #e53e3e; }}
-  .card.c-high     .num {{ color: #dd6b20; }}
-  .card.c-medium   .num {{ color: #d69e2e; }}
-  .card.c-blue     .num {{ color: #3182ce; }}
-  .card.c-green    .num {{ color: #38a169; }}
-
-  /* ── Charts row ── */
-  .charts {{ display: grid; grid-template-columns: 260px 1fr 260px;
-             gap: 1rem; padding: 0 2.5rem 1.5rem; align-items: start; }}
-  .chart-box {{ background: white; border-radius: 12px; padding: 1.2rem;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.07); }}
-  .chart-box h3 {{ font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
-                   letter-spacing: 0.06em; color: #718096; margin-bottom: 1rem; }}
-  .chart-box canvas {{ max-height: 220px; }}
-
-  /* ── Table ── */
-  .table-wrap {{ padding: 0 2.5rem 2.5rem; overflow-x: auto; }}
-  .section-title {{ font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
-                    letter-spacing: 0.06em; color: #718096; margin-bottom: 0.75rem; }}
-  table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 12px;
-           box-shadow: 0 1px 4px rgba(0,0,0,0.07); overflow: hidden; font-size: 0.82rem; }}
-  thead tr {{ background: #0f172a; color: white; }}
-  thead th {{ padding: 0.8rem 0.9rem; text-align: left; font-size: 0.72rem;
-              text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }}
-  tbody tr {{ border-bottom: 1px solid #f0f2f5; transition: background .1s; }}
-  tbody tr:last-child {{ border-bottom: none; }}
-  tbody tr:hover {{ filter: brightness(0.97); }}
-  tbody td {{ padding: 0.75rem 0.9rem; vertical-align: top; }}
-  tr.row-critical {{ background: #fff5f5; }}
-  tr.row-high     {{ background: #fffaf0; }}
-  tr.row-medium   {{ background: #fffff0; }}
-
-  /* ── Score bar ── */
-  .score-wrap {{ display: flex; align-items: center; gap: 0.4rem; min-width: 150px; }}
-  .score-num {{ font-weight: 800; font-size: 1.1rem; min-width: 1.5rem; }}
-  .score-bar-bg {{ flex: 1; background: #e2e8f0; border-radius: 999px; height: 6px; overflow: hidden; }}
-  .score-bar {{ height: 100%; border-radius: 999px; }}
-  .score-lbl {{ font-size: 0.65rem; font-weight: 700; min-width: 52px; }}
-  .score-critical, .score-bar-critical {{ color: #e53e3e; background: #e53e3e; }}
-  .score-high,     .score-bar-high     {{ color: #dd6b20; background: #dd6b20; }}
-  .score-medium,   .score-bar-medium   {{ color: #d69e2e; background: #d69e2e; }}
-  .score-low,      .score-bar-low      {{ color: #38a169; background: #38a169; }}
-  .score-none,     .score-bar-none     {{ color: #a0aec0; background: #a0aec0; }}
-
-  /* ── Badges ── */
-  .badge {{ display: inline-block; padding: 0.2rem 0.55rem; border-radius: 999px;
-            font-size: 0.7rem; font-weight: 700; }}
-  .badge-bad     {{ background: #fed7d7; color: #c53030; }}
-  .badge-good    {{ background: #c6f6d5; color: #276749; }}
-  .badge-neutral {{ background: #e2e8f0; color: #4a5568; }}
-
-  /* ── Misc ── */
-  .mono {{ font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; color: #4a5568; }}
-  .factors ul {{ list-style: none; }}
-  .factors li {{ padding: 0.08rem 0; color: #555; }}
-  .factors li::before {{ content: "· "; color: #cbd5e0; }}
-  .policies {{ color: #555; font-size: 0.76rem; max-width: 180px; line-height: 1.5; }}
-  .inline-pol {{ color: #a0aec0; font-style: italic; }}
-  footer {{ text-align: center; padding: 1.5rem; color: #a0aec0; font-size: 0.75rem; }}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f7fa;color:#333;padding:20px}}
+.container{{max-width:1400px;margin:0 auto}}
+h1{{color:#1a252f;margin-bottom:5px}}
+.generated{{color:#666;margin-bottom:20px;font-size:14px}}
+.stats-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px;margin-bottom:25px}}
+.stat-card{{background:#fff;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}}
+.stat-card .value{{font-size:28px;font-weight:700}}
+.stat-card .label{{font-size:13px;color:#666;margin-top:4px}}
+.stat-card.critical .value{{color:#d32f2f}}
+.stat-card.high .value{{color:#f57c00}}
+.stat-card.medium .value{{color:#fbc02d}}
+.stat-card.low .value{{color:#388e3c}}
+.summary-section{{margin-bottom:25px}}
+.stats-row{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:12px}}
+.section-label{{font-size:12px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}}
+.global-search{{margin-bottom:15px}}
+.global-search input{{padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;width:100%;max-width:500px}}
+table{{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
+th{{background:#1a252f;color:#fff;padding:10px 12px;text-align:left;font-size:13px;cursor:pointer;white-space:nowrap}}
+th:hover{{background:#2c3e50}}
+th .sort-arrow{{font-size:10px;margin-left:4px}}
+.col-filters td{{background:#e8ecf0;padding:6px 8px}}
+.col-filters input,.col-filters select{{width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:12px}}
+td{{padding:9px 12px;border-bottom:1px solid #eee;font-size:13px}}
+tr:hover td{{background:#f0f4f8}}
+.score{{display:inline-block;padding:2px 8px;border-radius:12px;font-weight:600;font-size:12px;color:#fff}}
+.score-critical{{background:#d32f2f}}
+.score-high{{background:#f57c00}}
+.score-medium{{background:#fbc02d;color:#333}}
+.score-low{{background:#388e3c}}
+.pagination{{display:flex;justify-content:center;align-items:center;gap:8px;margin-top:15px}}
+.pagination button{{padding:6px 14px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;font-size:13px}}
+.pagination button:hover{{background:#e8ecf0}}
+.pagination button:disabled{{opacity:.4;cursor:default}}
+.pagination .info{{font-size:13px;color:#666}}
+.risk-factors{{max-width:300px;font-size:12px}}
+.clear-btn{{padding:6px 14px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;margin-left:10px}}
+.clear-btn:hover{{background:#e8ecf0}}
+.prod-toggle{{display:inline-flex;align-items:center;gap:6px;margin-left:15px;font-size:13px;cursor:pointer}}
+.prod-toggle input{{cursor:pointer}}
 </style>
 </head>
 <body>
+<div class="container">
+<h1>IAM Access Key Risk Assessment</h1>
+<p class="generated">Generated: {generated_at}</p>
 
-<header>
-  <div class="icon">🔐</div>
-  <div>
-    <h1>AWS IAM Access Key Risk Assessment</h1>
-    <p>Account: {account_id} &nbsp;·&nbsp; Generated: {generated_at}</p>
+<div class="summary-section">
+  <div class="section-label">Overview</div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="value">{num_accounts}</div><div class="label">AWS Accounts</div></div>
+    <div class="stat-card"><div class="value">{total}</div><div class="label">Total Keys</div></div>
+    <div class="stat-card"><div class="value">{active}</div><div class="label">Active Keys</div></div>
+    <div class="stat-card"><div class="value">{inactive}</div><div class="label">Inactive Keys</div></div>
+    <div class="stat-card critical"><div class="value">{critical_account_keys}</div><div class="label">Critical Account Keys</div></div>
   </div>
-</header>
-
-<div class="summary">
-  <div class="card c-blue">    <div class="num">{total}</div>   <div class="lbl">Total Keys</div></div>
-  <div class="card c-blue">    <div class="num">{active}</div>  <div class="lbl">Active</div></div>
-  <div class="card c-critical"><div class="num">{critical}</div><div class="lbl">Critical (8-10)</div></div>
-  <div class="card c-high">    <div class="num">{high}</div>    <div class="lbl">High (5-7)</div></div>
-  <div class="card c-medium">  <div class="num">{medium}</div>  <div class="lbl">Medium (3-4)</div></div>
-  <div class="card c-critical"><div class="num">{no_mfa}</div>  <div class="lbl">No MFA</div></div>
-  <div class="card c-green">   <div class="num">{has_mfa}</div> <div class="lbl">MFA Enabled</div></div>
-</div>
-
-<div class="charts">
-  <div class="chart-box">
-    <h3>Risk Distribution</h3>
-    <canvas id="donutChart"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>Risk Score per User</h3>
-    <canvas id="barChart"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>MFA Status (Active Keys)</h3>
-    <canvas id="mfaChart"></canvas>
+  <div class="section-label">Risk Distribution</div>
+  <div class="stats-row">
+    <div class="stat-card critical"><div class="value">{critical}</div><div class="label">Critical (7-10)</div></div>
+    <div class="stat-card high"><div class="value">{high}</div><div class="label">High (5-6)</div></div>
+    <div class="stat-card medium"><div class="value">{medium}</div><div class="label">Medium (3-4)</div></div>
+    <div class="stat-card low"><div class="value">{low}</div><div class="label">Low (0-2)</div></div>
   </div>
 </div>
 
-<div class="table-wrap">
-  <div class="section-title">All Access Keys — sorted by risk score</div>
-  <table>
-    <thead>
-      <tr>
-        <th>User</th>
-        <th>Key ID</th>
-        <th>Status</th>
-        <th>Created</th>
-        <th>Last Used</th>
-        <th>Risk Score</th>
-        <th>MFA</th>
-        <th>Console</th>
-        <th>Risk Factors</th>
-        <th>Policies</th>
-      </tr>
-    </thead>
-    <tbody>
-      {key_rows()}
-    </tbody>
-  </table>
+<div class="global-search">
+<input type="text" id="globalSearch" placeholder="Search across all columns..." oninput="applyFilters()">
+<button class="clear-btn" onclick="clearAll()">Clear All Filters</button>
+<label class="prod-toggle"><input type="checkbox" id="prodOnly" onchange="applyFilters()"> Critical Account Only</label>
 </div>
 
-<footer>Generated by aws-iam-key-audit skill &nbsp;·&nbsp; {generated_at}</footer>
+<table>
+<thead>
+<tr>
+  <th onclick="sortTable('username')">User <span class="sort-arrow" id="sort-username"></span></th>
+  <th onclick="sortTable('account_name')">Account <span class="sort-arrow" id="sort-account_name"></span></th>
+  <th onclick="sortTable('key_id')">Key ID <span class="sort-arrow" id="sort-key_id"></span></th>
+  <th onclick="sortTable('status')">Status <span class="sort-arrow" id="sort-status"></span></th>
+  <th onclick="sortTable('risk_score')">Score <span class="sort-arrow" id="sort-risk_score"></span></th>
+  <th onclick="sortTable('created')">Created <span class="sort-arrow" id="sort-created"></span></th>
+  <th onclick="sortTable('last_used')">Last Used <span class="sort-arrow" id="sort-last_used"></span></th>
+  <th>Risk Factors</th>
+  <th onclick="sortTable('console_access')">Console <span class="sort-arrow" id="sort-console_access"></span></th>
+  <th onclick="sortTable('mfa_enabled')">MFA <span class="sort-arrow" id="sort-mfa_enabled"></span></th>
+</tr>
+<tr class="col-filters">
+  <td><input type="text" id="f-username" placeholder="Filter..." oninput="applyFilters()"></td>
+  <td><select id="f-account" onchange="applyFilters()"><option value="">All</option>{account_options}</select></td>
+  <td><input type="text" id="f-key_id" placeholder="Filter..." oninput="applyFilters()"></td>
+  <td><select id="f-status" onchange="applyFilters()"><option value="">All</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select></td>
+  <td><select id="f-score" onchange="applyFilters()"><option value="">All</option>{score_options}</select></td>
+  <td><input type="text" id="f-created" placeholder="e.g. 2024-04" oninput="applyFilters()"></td>
+  <td><input type="text" id="f-last_used" placeholder="e.g. 2025" oninput="applyFilters()"></td>
+  <td><input type="text" id="f-risk_factors" placeholder="Filter..." oninput="applyFilters()"></td>
+  <td><select id="f-console" onchange="applyFilters()"><option value="">All</option><option value="Yes">Yes</option><option value="No">No</option></select></td>
+  <td><select id="f-mfa" onchange="applyFilters()"><option value="">All</option><option value="Yes">Yes</option><option value="No">No</option></select></td>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+
+<div class="pagination">
+<button onclick="changePage(-1)" id="prevBtn">&larr; Prev</button>
+<span class="info" id="pageInfo"></span>
+<button onclick="changePage(1)" id="nextBtn">Next &rarr;</button>
+</div>
+</div>
 
 <script>
-Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-Chart.defaults.font.size = 12;
+const DATA={data_json};
+let filtered=[...DATA];
+let currentPage=1;
+const perPage=25;
+let sortKey='risk_score';
+let sortAsc=false;
 
-// Donut — risk distribution
-new Chart(document.getElementById('donutChart'), {{
-  type: 'doughnut',
-  data: {{
-    labels: ['Critical (8-10)', 'High (5-7)', 'Medium (3-4)', 'Low (1-2)', 'None'],
-    datasets: [{{
-      data: [{critical}, {high}, {medium}, {low}, {total - critical - high - medium - low}],
-      backgroundColor: ['#e53e3e','#dd6b20','#d69e2e','#38a169','#a0aec0'],
-      borderWidth: 2, borderColor: '#fff'
-    }}]
-  }},
-  options: {{
-    cutout: '68%',
-    plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, padding: 10, font: {{ size: 11 }} }} }} }}
-  }}
-}});
+function scoreClass(s){{if(s>=7)return'score-critical';if(s>=5)return'score-high';if(s>=3)return'score-medium';return'score-low'}}
 
-// Bar — score per user
-new Chart(document.getElementById('barChart'), {{
-  type: 'bar',
-  data: {{
-    labels: {user_labels},
-    datasets: [{{
-      label: 'Max Risk Score',
-      data: {user_data},
-      backgroundColor: {user_colors},
-      borderRadius: 6, borderSkipped: false
-    }}]
-  }},
-  options: {{
-    indexAxis: 'y',
-    scales: {{
-      x: {{ min: 0, max: 10, grid: {{ color: '#f0f2f5' }}, ticks: {{ stepSize: 2 }} }},
-      y: {{ grid: {{ display: false }} }}
-    }},
-    plugins: {{
-      legend: {{ display: false }},
-      tooltip: {{ callbacks: {{ label: ctx => ` Score: ${{ctx.parsed.x}}/10` }} }}
-    }}
-  }}
-}});
+function updateSortArrows(){{
+  document.querySelectorAll('.sort-arrow').forEach(el=>el.textContent='');
+  const el=document.getElementById('sort-'+sortKey);
+  if(el)el.textContent=sortAsc?'\\u25B2':'\\u25BC';
+}}
 
-// Donut — MFA status
-new Chart(document.getElementById('mfaChart'), {{
-  type: 'doughnut',
-  data: {{
-    labels: ['No MFA ⚠️', 'MFA Enabled ✓'],
-    datasets: [{{
-      data: [{no_mfa}, {has_mfa}],
-      backgroundColor: ['#e53e3e', '#38a169'],
-      borderWidth: 2, borderColor: '#fff'
-    }}]
-  }},
-  options: {{
-    cutout: '68%',
-    plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, padding: 10, font: {{ size: 11 }} }} }} }}
-  }}
-}});
+function renderTable(){{
+  const start=(currentPage-1)*perPage;
+  const page=filtered.slice(start,start+perPage);
+  const tbody=document.getElementById('tableBody');
+  tbody.innerHTML=page.map(r=>`<tr>
+<td>${{r.username}}</td>
+<td>${{r.account_id}}<br><small>${{r.account_name}}</small></td>
+<td><code>${{r.key_id}}</code></td>
+<td>${{r.status}}</td>
+<td><span class="score ${{scoreClass(r.risk_score)}}">${{r.risk_score}}</span></td>
+<td>${{r.created}}</td>
+<td>${{r.last_used}}</td>
+<td class="risk-factors">${{r.risk_factors||'\\u2014'}}</td>
+<td>${{r.console_access}}</td>
+<td>${{r.mfa_enabled}}</td>
+  </tr>`).join('');
+  const totalPages=Math.ceil(filtered.length/perPage)||1;
+  document.getElementById('pageInfo').textContent=`Page ${{currentPage}} of ${{totalPages}} (${{filtered.length}} results)`;
+  document.getElementById('prevBtn').disabled=currentPage<=1;
+  document.getElementById('nextBtn').disabled=currentPage>=totalPages;
+  updateSortArrows();
+}}
+
+function applyFilters(){{
+  const g=document.getElementById('globalSearch').value.toLowerCase();
+  const fUser=document.getElementById('f-username').value.toLowerCase();
+  const fAcc=document.getElementById('f-account').value;
+  const fKey=document.getElementById('f-key_id').value.toLowerCase();
+  const fStatus=document.getElementById('f-status').value;
+  const fScore=document.getElementById('f-score').value;
+  const fCreated=document.getElementById('f-created').value.toLowerCase();
+  const fLastUsed=document.getElementById('f-last_used').value.toLowerCase();
+  const fRisk=document.getElementById('f-risk_factors').value.toLowerCase();
+  const fConsole=document.getElementById('f-console').value;
+  const fMfa=document.getElementById('f-mfa').value;
+  const prodOnly=document.getElementById('prodOnly').checked;
+
+  filtered=DATA.filter(r=>{{
+    if(prodOnly&&!r.is_production)return false;
+    if(g){{const all=Object.values(r).join(' ').toLowerCase();if(!all.includes(g))return false}}
+    if(fUser&&!r.username.toLowerCase().includes(fUser))return false;
+    if(fAcc&&r.account_id!==fAcc)return false;
+    if(fKey&&!r.key_id.toLowerCase().includes(fKey))return false;
+    if(fStatus&&r.status!==fStatus)return false;
+    if(fScore&&r.risk_score!==parseInt(fScore))return false;
+    if(fCreated&&!r.created.toLowerCase().includes(fCreated))return false;
+    if(fLastUsed&&!r.last_used.toLowerCase().includes(fLastUsed))return false;
+    if(fRisk&&!r.risk_factors.toLowerCase().includes(fRisk))return false;
+    if(fConsole&&r.console_access!==fConsole)return false;
+    if(fMfa&&r.mfa_enabled!==fMfa)return false;
+    return true;
+  }});
+  doSort();
+  currentPage=1;
+  renderTable();
+}}
+
+function clearAll(){{
+  document.getElementById('globalSearch').value='';
+  document.getElementById('prodOnly').checked=false;
+  document.querySelectorAll('.col-filters input').forEach(el=>el.value='');
+  document.querySelectorAll('.col-filters select').forEach(el=>el.value='');
+  applyFilters();
+}}
+
+function sortTable(key){{
+  if(sortKey===key)sortAsc=!sortAsc;
+  else{{sortKey=key;sortAsc=true}}
+  doSort();
+  renderTable();
+}}
+
+function doSort(){{
+  filtered.sort((a,b)=>{{
+    let va=a[sortKey],vb=b[sortKey];
+    if(typeof va==='number')return sortAsc?va-vb:vb-va;
+    va=String(va).toLowerCase();vb=String(vb).toLowerCase();
+    return sortAsc?va.localeCompare(vb):vb.localeCompare(va);
+  }});
+}}
+
+function changePage(delta){{currentPage+=delta;renderTable()}}
+
+doSort();
+renderTable();
 </script>
 </body>
 </html>"""
@@ -337,7 +324,6 @@ def main():
     with open(csv_path, newline="") as f:
         rows = list(csv.DictReader(f))
 
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     account_id = rows[0].get("Account_ID", "") if rows else ""
     html = build_html(rows, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), account_id)
 

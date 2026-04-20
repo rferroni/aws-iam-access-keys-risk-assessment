@@ -68,7 +68,7 @@ This isn't just another data collector—it's an **intelligent security analyst*
 <td width="50%">
 
 ### 📊 Actionable Output
-- 📄 **Multiple Formats** - Interactive HTML with charts, structured CSV, and JSON for automation
+- 📄 **Multiple Formats** - Interactive HTML with filtering and sorting, structured CSV, and JSON for automation
 - 🗂️ **Organized Storage** - Timestamped folders for data versioning
 - 🎨 **High-Risk Summary** - Focus on keys requiring immediate attention
 - 📈 **Trend Analysis** - Compare assessments over time
@@ -377,7 +377,7 @@ The tool generates organized, timestamped directories for easy tracking and comp
 │   └── CloudTrail-Events_*.csv                # 🕵️ Usage forensics
 │
 ├── 📂 assessment_output_20251010_143000/      # 📊 Risk analysis reports
-│   ├── iam_risk_report_*.html                 # 🌐 Interactive HTML with charts
+│   ├── iam_risk_report_*.html                 # 🌐 Interactive HTML dashboard
 │   ├── iam_risk_assessment_*.json             # 📋 Machine-readable JSON
 │   ├── iam_risk_assessment_detailed_*.csv     # 📈 Complete dataset
 │   └── iam_risk_assessment_summary_*.csv      # 🎯 High-risk keys only
@@ -424,9 +424,13 @@ The tool generates organized, timestamped directories for easy tracking and comp
 <td>
 
 1. **🌐 HTML Report** - Interactive dashboard with:
-   - Chart.js visualizations (risk distribution, per-user scores, MFA status)
-   - Color-coded risk score table
-   - Overall statistics and summary cards
+   - Summary cards (overview stats and risk distribution)
+   - Sortable, filterable data table with column-level filters
+   - Global search across all columns
+   - Pagination for large datasets
+   - "Critical Account Only" toggle for production/management accounts
+   - Color-coded risk score badges
+   - Fully self-contained (no external dependencies)
 
 2. **📋 JSON Report** - Machine-readable output with:
    - Metadata (timestamp, account IDs)
@@ -460,17 +464,18 @@ The tool generates organized, timestamped directories for easy tracking and comp
 
 ### 📄 What's in the Reports?
 
-The HTML report includes interactive Chart.js visualizations:
+The HTML report is a fully self-contained interactive dashboard:
 
-- 📊 **Risk Distribution** - Donut chart showing critical/high/medium/low breakdown
-- 👤 **Per-User Risk Scores** - Horizontal bar chart of max risk score per user
-- 🔐 **MFA Status** - Donut chart of MFA-enabled vs disabled active keys
-- 📋 **Detailed Table** - All access keys sorted by risk score with:
-  - Risk score bar with severity label
-  - Key metadata (status, creation, last used)
-  - Attached policies (managed and inline)
-  - Console access and MFA badges
-  - Risk factors list
+- 📊 **Overview Cards** - AWS accounts, total/active/inactive keys, critical account keys
+- 🎯 **Risk Distribution** - Critical, high, medium, and low risk counts
+- 🔍 **Global Search** - Search across all columns instantly
+- 📋 **Interactive Table** - All access keys with:
+  - Sortable columns (click any header)
+  - Per-column filters (text input, dropdowns)
+  - Color-coded risk score badges
+  - Risk factors, policies, console access, and MFA status
+- 🏢 **Critical Account Toggle** - Filter to production/management accounts only
+- 📄 **Pagination** - Navigate large datasets easily
 
 The JSON report provides structured data for automation:
 

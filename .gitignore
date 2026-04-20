@@ -11,7 +11,7 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .hypothesis/
-test/
+tests/
 
 # Virtual environment
 venv/
